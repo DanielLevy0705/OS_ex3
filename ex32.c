@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <wait.h>
+#include <time.h>
 
 void clearBuffWithSize(char buff[], int size) {
     int i;
@@ -31,33 +32,28 @@ void clearBuffWithSize(char buff[], int size) {
 
 int executeFile(char input[], char output[],
                 char user[], int resFd, char pathName[], char myOtpt[]) {
-    int i, status;
+    int status;
     char *args1[] = {"gcc", pathName, NULL};
     char *args2[] = {"./a.out", NULL};
-    char *args3[] = {"./comp.out", myOtpt, output, NULL};
+    char *args3[] = {"./comp.out", output,myOtpt, NULL};
     int iptFd = open(input, O_RDONLY);
-    int myOtptFd = open(myOtpt, O_CREAT | O_WRONLY | O_RDONLY | O_APPEND);
+    int myOtptFd = open(myOtpt, O_CREAT | O_WRONLY | O_RDONLY,
+            S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IROTH|S_IWOTH|S_IWGRP|S_IXGRP|S_IXOTH);
+    time_t timeBfr,timeAftr;
+    struct tm *tmInfBfr , * tmInfAftr;
+    time(&timeBfr);
+    tmInfBfr = localtime(&timeBfr);
+    int bfr = tmInfBfr->tm_sec;
     int pid = fork();
     if (pid == -1) {
         unlink(myOtpt);
         return -1;
     } else if (pid > 0) {
-        waitpid(pid, &status, WNOHANG);
-        if (status == -1) {
+        waitpid(pid, &status,0);
+        status = WEXITSTATUS(status);
+        close(iptFd);
+        if (status == 1) {
             strcat(user, COMP_ERR);
-            write(resFd, user, strlen(user));
-            unlink(myOtpt);
-            return 1;
-        }
-
-        for (i = 0; i < 5; i++) {
-            if (waitpid(pid, NULL, WNOHANG) != 0) {
-                break;
-            }
-            sleep(1);
-        }
-        if (i == 5) {
-            strcat(user, TIMEOUT);
             write(resFd, user, strlen(user));
             unlink(myOtpt);
             return 1;
@@ -67,12 +63,14 @@ int executeFile(char input[], char output[],
                 unlink(myOtpt);
                 return -1;
             } else if (pid > 0) {
+                // TODO: check here if the time passed 5 seconds
+                //check time
+                // write to resFd timeout.
                 pid = fork();
                 if (pid == -1) {
                     unlink(myOtpt);
                     return -1;
                 } else if (pid > 0) {
-                    // TODO : understand why the exit status is 65280.
                     waitpid(pid,&status,0);
                     int retVal = WEXITSTATUS(status);
                     switch (retVal) {
@@ -237,7 +235,8 @@ int main(int argc, char *argv[]) {
     strcpy(result, cwd);
     strcpy(myOtpt, cwd);
     strcat(cwd, "/results.csv");
-    int resFd = open(cwd, O_CREAT | O_WRONLY | O_RDONLY | O_APPEND);
+    int resFd = open(cwd, O_CREAT | O_WRONLY | O_RDONLY | O_APPEND,
+                     S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IROTH|S_IWOTH|S_IWGRP|S_IXGRP|S_IXOTH);
     strcat(myOtpt, "/myOtpt.txt");
     //run for every user in directory
     while (pDirent != NULL) {
