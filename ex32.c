@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <wait.h>
 #include <time.h>
+#include <stdlib.h>
 
 void clearBuffWithSize(char buff[], int size) {
     int i;
@@ -35,43 +36,53 @@ int executeFile(char input[], char output[],
     int status;
     char *args1[] = {"gcc", pathName, NULL};
     char *args2[] = {"./a.out", NULL};
-    char *args3[] = {"./comp.out", output,myOtpt, NULL};
+    char *args3[] = {"./comp.out", output, myOtpt, NULL};
     int iptFd = open(input, O_RDONLY);
     int myOtptFd = open(myOtpt, O_CREAT | O_WRONLY | O_RDONLY,
-            S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IROTH|S_IWOTH|S_IWGRP|S_IXGRP|S_IXOTH);
-    time_t timeBfr,timeAftr;
-    struct tm *tmInfBfr , * tmInfAftr;
+                        S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IROTH | S_IWOTH | S_IWGRP | S_IXGRP | S_IXOTH);
+    time_t timeBfr, timeAftr;
+    struct tm *tmInfBfr, *tmInfAftr;
     time(&timeBfr);
     tmInfBfr = localtime(&timeBfr);
     int bfr = tmInfBfr->tm_sec;
     int pid = fork();
     if (pid == -1) {
         unlink(myOtpt);
+        close(iptFd);
         return -1;
     } else if (pid > 0) {
-        waitpid(pid, &status,0);
+        waitpid(pid, &status, 0);
         status = WEXITSTATUS(status);
-        close(iptFd);
         if (status == 1) {
             strcat(user, COMP_ERR);
             write(resFd, user, strlen(user));
             unlink(myOtpt);
+            close(iptFd);
             return 1;
         } else {
             pid = fork();
             if (pid == -1) {
+                close(iptFd);
                 unlink(myOtpt);
                 return -1;
             } else if (pid > 0) {
-                // TODO: check here if the time passed 5 seconds
-                //check time
-                // write to resFd timeout.
+                close(iptFd);
+                while (waitpid(pid, &status, WNOHANG) != pid) {
+                    time(&timeAftr);
+                    tmInfAftr = localtime(&timeAftr);
+                    if (abs(bfr - tmInfAftr->tm_sec) > 5) {
+                        strcat(user, TIMEOUT);
+                        write(resFd, user, strlen(user));
+                        unlink(myOtpt);
+                        return 1;
+                    }
+                }
                 pid = fork();
                 if (pid == -1) {
                     unlink(myOtpt);
                     return -1;
                 } else if (pid > 0) {
-                    waitpid(pid,&status,0);
+                    waitpid(pid, &status, 0);
                     int retVal = WEXITSTATUS(status);
                     switch (retVal) {
                         case 1:
@@ -92,34 +103,36 @@ int executeFile(char input[], char output[],
                     }
                 } else if (pid == 0) {
                     execvp(args3[0], args3);
-                    _exit(-1);
+                    write(2, ERR_MSG, strlen(ERR_MSG));
+                    _exit(1);
                 }
             } else if (pid == 0) {
                 dup2(iptFd, 0);
                 dup2(myOtptFd, 1);
                 execvp(args2[0], args2);
                 write(2, ERR_MSG, strlen(ERR_MSG));
-                _exit(-1);
+                _exit(1);
             }
         }
     } else if (pid == 0) {
         execvp(args1[0], args1);
         write(2, ERR_MSG, strlen(ERR_MSG));
-        _exit(-1);
+        _exit(1);
     }
     unlink(myOtpt);
     return 1;
 }
 
-
+// TODO: something is going on in here, must be with compilation directories.
 int dirActions(char dir[], char input[],
                char output[], DIR *pDir,
-               struct dirent *pDirent, char user[], int resFd, char myOtpt[]) {
+               struct dirent *pDirent, char user[], int resFd, char myOtpt[],char origDir[]) {
     int res = 0;
     char name[MAX_ROW_LEN + 1], pathName[MAX_ROW_LEN + 1];
     clearBuffWithSize(name, MAX_ROW_LEN + 1);
     clearBuffWithSize(pathName, MAX_ROW_LEN + 1);
-
+    struct stat statbuf;
+    DIR * newPdir;
     while (pDirent != NULL) {
         if (strcmp(pDirent->d_name, ".") == 0 || strcmp(pDirent->d_name, "..") == 0) {
             pDirent = readdir(pDir);
@@ -132,18 +145,29 @@ int dirActions(char dir[], char input[],
         if (strlen(name) > 2) {
             if (name[strlen(name) - 1] == 'c' && name[strlen(name) - 2] == '.') {
                 res = executeFile(input, output, user, resFd, pathName, myOtpt);
-                if (res == -1) {
-                    return -1;
-                }
+                return res;
             }
         }
-        if (pDirent->d_type == DT_DIR) {
-            pDir = opendir(pathName);
+        int st = stat(pathName, &statbuf);
+        if (st < 0) {
+            perror("stat()");
+            printf("%s\n",pathName);
+            return -1;
+        }
+        if (S_ISDIR(statbuf.st_mode)) {
+            newPdir = opendir(pathName);
             if (pDir == NULL) {
                 return -1;
             }
-            pDirent = readdir(pDir);
-            res = dirActions(pathName, input, output, pDir, pDirent, user, resFd, myOtpt);
+            pDirent = readdir(newPdir);
+            res = dirActions(pathName, input, output, newPdir, pDirent, user, resFd, myOtpt,origDir);
+            closedir(newPdir);
+            if(dir == origDir){
+                return res;
+            }
+        }
+        if(res){
+            return res;
         }
         pDirent = readdir(pDir);
     }
@@ -151,12 +175,10 @@ int dirActions(char dir[], char input[],
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        perror("not enough arguments.");
-    }
     int fdConf = open(argv[1], O_RDONLY);
     if (fdConf == -1) {
         write(2, ERR_MSG, strlen(ERR_MSG));
+        return -1;
     }
     int oneByte = 1, rowFlag = 1, rd, i1 = 0, i2 = 0, i3 = 0;
     char readByte[oneByte + 1];
@@ -236,7 +258,7 @@ int main(int argc, char *argv[]) {
     strcpy(myOtpt, cwd);
     strcat(cwd, "/results.csv");
     int resFd = open(cwd, O_CREAT | O_WRONLY | O_RDONLY | O_APPEND,
-                     S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IROTH|S_IWOTH|S_IWGRP|S_IXGRP|S_IXOTH);
+                     S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IROTH | S_IWOTH | S_IWGRP | S_IXGRP | S_IXOTH);
     strcat(myOtpt, "/myOtpt.txt");
     //run for every user in directory
     while (pDirent != NULL) {
@@ -246,7 +268,7 @@ int main(int argc, char *argv[]) {
         }
         int res = dirActions(confRow1, confRow2,
                              confRow3, pDir, pDirent,
-                             pDirent->d_name, resFd, myOtpt);
+                             pDirent->d_name, resFd, myOtpt,confRow1);
         if (res == 0) {
             strcpy(user, pDirent->d_name);
             strcat(user, NO_C);
