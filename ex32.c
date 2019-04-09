@@ -123,7 +123,6 @@ int executeFile(char input[], char output[],
     return 1;
 }
 
-// TODO: something is going on in here, must be with compilation directories.
 int dirActions(char dir[], char input[],
                char output[], DIR *pDir,
                struct dirent *pDirent, char user[], int resFd, char myOtpt[],char origDir[]) {
@@ -266,11 +265,11 @@ int main(int argc, char *argv[]) {
             pDirent = readdir(pDir);
             continue;
         }
+        strcpy(user, pDirent->d_name);
         int res = dirActions(confRow1, confRow2,
                              confRow3, pDir, pDirent,
-                             pDirent->d_name, resFd, myOtpt,confRow1);
+                             user, resFd, myOtpt,confRow1);
         if (res == 0) {
-            strcpy(user, pDirent->d_name);
             strcat(user, NO_C);
             write(resFd, user, strlen(user));
         } else if (res == -1) {
