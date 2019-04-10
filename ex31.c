@@ -15,28 +15,29 @@
 #include <string.h>
 #include <ctype.h>
 
-
+//a function to clear a buffer
 void clearBuff(char buff[]){
     int i;
     for(i=0;i<KILO_SIZE+1;i++){
         buff[i] = '\0';
     }
 }
+//a function to check the reading result.
 int readCheck(int rd1, int rd2, int fl1, int fl2,
               int *rdMore1, int *rdMore2) {
+    //if there was an error, print err msg
     if (rd1 < 0 || rd2 < 0) {
         write(2, ERR_MSG, strlen(ERR_MSG));
-        close(fl1);
-        close(fl2);
         return -1;
     }
+    //check for both files if they have more to read.
     if (rd1 < KILO_SIZE)
         *rdMore1 = 0;
     if (rd2 < KILO_SIZE)
         *rdMore2 = 0;
     return 0;
 }
-
+//check if the char is a space, if it is return the space value, else return 0.
 char isSpace(char c) {
     if (c == SPACE)
         return SPACE;
@@ -45,8 +46,10 @@ char isSpace(char c) {
     }
     return 0;
 }
+//create a new string from the original buffer.
 void newBuffs(int len,const char buf[],char newBuf[]){
     int i,k=0;
+    //new string will be the original one with uppercase and no spaces.
     for(i=0;i<len;i++){
         if(!isSpace(buf[i])) {
             newBuf[k] = toupper(buf[i]);
@@ -55,45 +58,7 @@ void newBuffs(int len,const char buf[],char newBuf[]){
     }
 }
 
-int compareChars(char c1, char c2) {
-    if (c1 == c2)
-        return 0;
-    return (c1-c2);
-
-}
-int myStrCmp(const char* buf1,const char* buf2){
-    int len1 = strlen(buf1);
-    int len2 = strlen(buf2);
-    int i=0,res=0;
-    if (len1!=len2)
-        return len1-len2;
-    for(i=0;i<len1;i++){
-        int res = compareChars(buf1[i],buf2[i]);
-        if(res!=0)
-            break;
-    }
-    return res;
-}
-int isLetter(char c) {
-    char a = 'a';
-    char capA = 'A';
-    char z = 'z';
-    char capZ = 'Z';
-    if ((capA <= c && c <= capZ) || (a <= c && c <= z))
-        return 1;
-    return 0;
-}
-
-/***
- *
- * @param buf1
- * @param buf2
- * @param rdMore1
- * @param rdMore2
- * @param len1
- * @param len2
- * @return
- */
+//a function to check if strings are similar or different.
 int compareStrings(const char *buf1, const char *buf2,
                    int *rdMore1, int *rdMore2, int len1, int len2,int fd1,int fd2) {
     int run=1,rd1=0,rd2=0;
@@ -105,9 +70,10 @@ int compareStrings(const char *buf1, const char *buf2,
     clearBuff(newTemp);
     newBuffs(len1,buf1,newBuf1);
     newBuffs(len2,buf2,newBuf2);
-    while (run){ // what condition to put here
-
+    while (run){
+        //check the difference between the strings length.
         diff = strlen(newBuf1) - strlen(newBuf2);
+        //create a new buffer with newBuffs function.
         if(diff>0){
             if(*rdMore1){
                 clearBuff(temp);
@@ -116,8 +82,10 @@ int compareStrings(const char *buf1, const char *buf2,
                 strcat(newBuf2,newTemp);
                 clearBuff(newTemp);
             }else{
+                //if there is nothing to read the strings are different.
                 return 2;
             }
+            //create a new buffer with newBuffs function.
         }else if(diff<0){
             if(*rdMore2){
                 clearBuff(temp);
@@ -125,11 +93,14 @@ int compareStrings(const char *buf1, const char *buf2,
                 newBuffs(rd1,temp,newTemp);
                 strcat(newBuf1,newTemp);
                 clearBuff(newTemp);
+                //if there is nothing to read the strings are different.
             }else{
+                //if the lengths are equal the strings are different.
                 return 2;
             }
         }else{
-            int cmp = myStrCmp(newBuf1,newBuf2);
+            //if the new buffs are similar break the loop.
+            int cmp = strcmp(newBuf1,newBuf2);
             if(cmp == 0)
                 run=0;
         }
@@ -146,11 +117,7 @@ int main(int argc, char *argv[]) {
     char buf2[KILO_SIZE+1];
     clearBuff(buf1);
     clearBuff(buf2);
-    if (argc != 3) {
-        perror("not enough arguments.");
-        return -1;
-    }
-
+    //open files.
     int fl1 = open(argv[1], O_RDONLY);
     if (fl1 < 0) {
         write(2, ERR_MSG, strlen(ERR_MSG));
@@ -165,23 +132,30 @@ int main(int argc, char *argv[]) {
     int cmp = 0;
     //a loop to read untill a diffrence or end of files.
     while (cmp == 0) {
+        //if both files are at the end, the files are equal.
         if (!rdMore2 && !rdMore1){
             close(fl1);
             close(fl2);
             return 1;
         }
+        //read if has more to read.
         if (rdMore1){
             clearBuff(buf1);
             rd1 = read(fl1, buf1, KILO_SIZE);
         }
+        //read if has more to read.
         if (rdMore2){
             clearBuff(buf2);
             rd2 = read(fl2, buf2, KILO_SIZE);
         }
+        //check the reading status.
         int rdErr = readCheck(rd1, rd2, fl1, fl2, &rdMore1, &rdMore2);
-        if (rdErr)
+        if (rdErr){
+            close(fl1);
+            close(fl2);
             return -1;
-        cmp = myStrCmp(buf1, buf2);
+        }
+        cmp = strcmp(buf1, buf2);
     }
     //if we got here the files are different, check if they are similar.
     while (res == 3) {
@@ -190,21 +164,27 @@ int main(int argc, char *argv[]) {
         if(res == 2 || !(rdMore1 || rdMore2)){
             close(fl1);
             close(fl2);
-            break;
+            return res;
         }
         if(res==-1)
             break;
+        //read if has more to read.
         if (rdMore1){
             clearBuff(buf1);
             rd1 = read(fl1, buf1, KILO_SIZE);
         }
+        //read if has more to read.
         if (rdMore2){
             clearBuff(buf2);
             rd2 = read(fl2, buf2, KILO_SIZE);
         }
+        //check the reading status.
         int rdErr = readCheck(rd1, rd2, fl1, fl2, &rdMore1, &rdMore2);
-        if (rdErr)
+        if (rdErr){
+            close(fl1);
+            close(fl2);
             return -1;
+        }
     }
     //close the files.
     close(fl1);
